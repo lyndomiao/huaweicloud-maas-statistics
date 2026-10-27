@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Huawei Cloud MaaS (ModelArts Studio) invocation statistics and cost.
+Huawei Cloud MaaS (Model as a Service) invocation statistics and cost.
 
 Auth: HWCLOUD_AK / HWCLOUD_SK (SDK-HMAC-SHA256 signing) or HWCLOUD_TOKEN.
 Required: HWCLOUD_PROJECT_ID. Optional: HWCLOUD_REGION (default ap-southeast-1),
@@ -1070,7 +1070,7 @@ def build_parser():
     common.add_argument("--dry-run", action="store_true", help="Print the signed request only, no network")
 
     p = argparse.ArgumentParser(prog="maas_statistics.py",
-                                description="Huawei Cloud MaaS (ModelArts Studio) invocation statistics",
+                                description="Huawei Cloud MaaS (Model as a Service) invocation statistics",
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
 

@@ -1,6 +1,6 @@
 # Huawei Cloud MaaS Statistics
 
-A command-line skill that reports **Huawei Cloud MaaS (Model as a Service / ModelArts Studio)** online-inference usage and cost — aggregate statistics, per-model requests / error rate / tokens / cost, caller source IPs, and per-model real cost from the official bill. It talks directly to the Huawei Cloud monitoring APIs (and the OCE billing API), handles `SDK-HMAC-SHA256` AK/SK signing itself, and needs **only the Python 3 standard library** (no `pip install`).
+A command-line skill that reports **Huawei Cloud MaaS (Model as a Service)** online-inference usage and cost — aggregate statistics, per-model requests / error rate / tokens / cost, caller source IPs, and per-model real cost from the official bill. It talks directly to the Huawei Cloud monitoring APIs (and the OCE billing API), handles `SDK-HMAC-SHA256` AK/SK signing itself, and needs **only the Python 3 standard library** (no `pip install`).
 
 ## Features
 
