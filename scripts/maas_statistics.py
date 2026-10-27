@@ -685,8 +685,8 @@ def _print_services_table(items, token_size=False, cost_map=None, show_latency=F
         ("Input(M)", 11, lambda x: _mtok(x.get("prompt_token"))),
         ("Output(M)", 11, lambda x: _mtok(x.get("completion_token"))),
         ("Total(M)", 11, lambda x: _mtok(x.get("total_token"))),
-        ("Cost(USD)", 10, cost),
         ("Cache Hit", 10, cache),
+        ("Cost(USD)", 10, cost),
     ]
     if show_latency:
         cols += [

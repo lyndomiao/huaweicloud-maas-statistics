@@ -5,7 +5,7 @@ A command-line skill that reports **Huawei Cloud MaaS (Model as a Service)** onl
 ## Features
 
 - **Aggregate summary** — total requests, errors, error rate, input/output/total tokens.
-- **Per-model table** — requests, error rate, input/output/total (millions of tokens), cost (USD), cache hit ratio.
+- **Per-model table** — requests, error rate, input/output/total (millions of tokens), cache hit ratio, cost (USD).
 - **Optional latency** — avg/max end-to-end latency, avg/max TTFT, avg/max TPOT, plus avg/max input/output tokens per request.
 - **Cost from the official bill** — per-model actual charged amount, aligned to the same local-time window.
 - **Two donut charts** (PNG) — token total share and cost share, auto-generated under `maas_charts/`.
@@ -86,7 +86,7 @@ python scripts/maas_statistics.py billing --date 2026-10-27
 | Subcommand | What it does |
 |---|---|
 | `summary` | Aggregate total requests / errors / tokens for a window. |
-| `services` | Per-model requests, error rate, tokens, cost, cache hit ratio, two donut charts (+ optional latency / token size). |
+| `services` | Per-model requests, error rate, tokens, cache hit ratio, cost, two donut charts (+ optional latency / token size). |
 | `ips` | Caller source IP list. |
 | `billing` | Per-model real cost from the official bill (OCE `res-fee-records`). |
 | `selftest` | Verify AK/SK signing against the official example hash (no credentials needed). |
@@ -113,13 +113,14 @@ python scripts/maas_statistics.py billing --date 2026-10-27
 ============================================================
 Huawei Cloud MaaS per-model statistics (4 rows)
 Time range: 2026-10-26 00:00:00 ~ 2026-10-27 00:00:00 (Africa/Nairobi)
+Note: no timezone specified; using detected user timezone Africa/Nairobi (UTC+03:00).
 ============================================================
-Model                       Requests    Error %    Input(M)     Output(M)    Total(M)     Cost(USD)   Cache Hit
+Model                       Requests    Error %    Input(M)     Output(M)    Total(M)     Cache Hit   Cost(USD)
 ----------------------------------------------------------------------------------------------------------------
-GLM-5.2                     16          0.00%      0.382        0.011        0.392        0.25        68.40%
-DeepSeek-V4.1-Flash         571         3.33%      19.288       1.261        20.550       2.69        71.17%
-GLM-5.3                     102         8.82%      13.952       0.130        14.082       6.17        94.43%
-DeepSeek-V4-Flash           247         2.43%      0.118        0.101        0.219        0.03        0.00%
+GLM-5.2                     16          0.00%      0.382        0.011        0.392        68.40%      0.25
+DeepSeek-V4.1-Flash         571         3.33%      19.288       1.261        20.550       71.17%      2.69
+GLM-5.3                     102         8.82%      13.952       0.130        14.082       94.43%      6.17
+DeepSeek-V4-Flash           247         2.43%      0.118        0.101        0.219        0.00%       0.03
 ```
 
 Charts are written to `./maas_charts/` (`token_donut_*.png`, `cost_donut_*.png`) with English labels.

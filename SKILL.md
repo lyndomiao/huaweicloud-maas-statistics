@@ -12,7 +12,7 @@ Query online-inference model usage via Huawei Cloud **MaaS (Model as a Service) 
 | Subcommand | Purpose |
 |---|---|
 | `summary` | Aggregate total requests / errors / tokens |
-| `services` | Per-model requests, error rate, tokens, cost, cache hit ratio (+ optional latency / token size) |
+| `services` | Per-model requests, error rate, tokens, cache hit ratio, cost (+ optional latency / token size) |
 | `ips` | Caller source IP list |
 | `billing` | Per-model real cost from the official bill (OCE `res-fee-records`) |
 
@@ -34,7 +34,7 @@ python scripts/maas_statistics.py billing --date 2026-10-27 --timezone Africa/Na
 - Time: `--last 24h|7d|30d`, `--days N`, or `--start/--end` (span ≤ 30 days).
 - `--service-type 2`(preset)/`4`(custom)/`all`; `--infer-type real_time|batch`; `--model-type ...`.
 - Filters: `--service-names`, `--models`, `--api-keys`, `--ips`; for `ips`: `--ip-search`, `--service-id`.
-- `services` defaults: requests, error rate, **input/output/total (million tokens)**, **cost (USD)**, **cache hit ratio**, plus two donut charts under `maas_charts/`.
+- `services` defaults: requests, error rate, **input/output/total (million tokens)**, **cache hit ratio**, **cost (USD)**, plus two donut charts under `maas_charts/`.
   - **Latency hidden by default**; add `--latency` to show avg/max end-to-end latency, avg/max TTFT, avg/max TPOT (per-service `show-detail-chart`, 20s rate limit).
   - `--token-size` adds avg/max input/output tokens (per request). `--no-cost`, `--no-chart`, `--no-max` to skip. `--json` for raw JSON.
 - When latency is hidden, proactively ask the user whether to query avg/max end-to-end latency, avg/max TTFT, avg/max TPOT (then run with `--latency`).
