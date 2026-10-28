@@ -618,17 +618,17 @@ code,textarea{font-family:Consolas,monospace}textarea{width:100%;height:120px}
 .btn{display:inline-block;padding:8px 14px;background:#c7000b;color:#fff;border-radius:6px;text-decoration:none}
 ol li{margin:6px 0}.muted{color:#666;font-size:13px}</style></head>
 <body>
-<h2>MaaS token capture（无需 AK/SK）</h2>
+<h2>MaaS token capture (no AK/SK)</h2>
 <ol>
-<li>先在<strong>同一个浏览器</strong>里登录华为云控制台（任意账号/区域）。</li>
-<li>把下面的按钮拖到书签栏（只装一次）：<br><a class="btn" id="bk" href="#">抓取 MaaS Token</a></li>
-<li>切换到<strong>华为云控制台</strong>页面，点书签栏里的“抓取 MaaS Token”。</li>
-<li>看到 "OK: token captured" 即成功，回到终端执行查询即可。</li>
+<li>In the <strong>same browser</strong>, sign in to the Huawei Cloud console (any account / region).</li>
+<li>Drag the button below to your bookmarks bar (one time):<br><a class="btn" id="bk" href="#">Capture MaaS Token</a></li>
+<li>Switch to the <strong>Huawei Cloud console</strong> tab and click the "Capture MaaS Token" bookmark.</li>
+<li>When you see "OK: token captured", return to the terminal and run your query.</li>
 </ol>
-<p class="muted">书签失败时，可在控制台按 F12 → Network 任选一个请求，复制 <b>X-Auth-Token</b> 请求头，粘贴到下面手动提交：</p>
-<textarea id="tk" placeholder="粘贴 X-Auth-Token ..."></textarea>
-<p><button class="btn" onclick="manual()">手动提交 Token</button> <span id="msg"></span></p>
-<p class="muted">书签脚本（备用，手动新建书签时粘贴到网址栏）：</p>
+<p class="muted">If the bookmarklet cannot find the token, open DevTools (F12) &rarr; Network &rarr; any request, copy the <b>X-Auth-Token</b> header, and submit it below:</p>
+<textarea id="tk" placeholder="Paste X-Auth-Token ..."></textarea>
+<p><button class="btn" onclick="manual()">Submit token manually</button> <span id="msg"></span></p>
+<p class="muted">Bookmarklet source (to create a bookmark manually, paste this into its URL):</p>
 <textarea id="bmsrc" readonly>__BM__</textarea>
 <script>
 document.getElementById('bk').href = document.getElementById('bmsrc').value;
