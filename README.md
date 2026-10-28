@@ -30,23 +30,24 @@ python scripts/maas_statistics.py --help
 
 ## Configuration
 
-Credentials and defaults are read from environment variables (or flags):
+Credentials and defaults are read from environment variables (or flags). **Minimal setup is 3 values** — `HWCLOUD_PROJECT_ID`, `HWCLOUD_OIDC_ISSUER`, `HWCLOUD_OIDC_CLIENT_ID`; everything else has defaults.
 
-| Variable | Required | Description |
-|---|---|---|
-| `HWCLOUD_PROJECT_ID` | yes | Project ID (or `--project-id`) |
-| `HWCLOUD_OIDC_AUTHORIZE_URL` | login | OIDC authorization endpoint |
-| `HWCLOUD_OIDC_TOKEN_URL` | login | OIDC token endpoint |
-| `HWCLOUD_OIDC_CLIENT_ID` | login | OIDC client id |
-| `HWCLOUD_OIDC_CLIENT_SECRET` | no | OIDC client secret (confidential client) |
-| `HWCLOUD_OIDC_SCOPE` | no | OIDC scope, default `openid profile` |
-| `HWCLOUD_OIDC_PORT` | no | Local callback port, default `8765` |
-| `HWCLOUD_IDP_ID` + `HWCLOUD_IAM_EXCHANGE_URL` | no | Exchange `id_token` for an IAM token |
-| `HWCLOUD_REGION` | no | Region, default `ap-southeast-1` |
-| `HWCLOUD_TIMEZONE` | no | User timezone, e.g. `Asia/Shanghai` |
-| `HWCLOUD_TOKEN` | no | Override the saved token with a temporary `X-Auth-Token` |
-| `HWCLOUD_AK` / `HWCLOUD_SK` | no | Optional fallback: AK/SK signing |
-| `MAAS_ENDPOINT` | no | Override the MaaS endpoint host |
+| Variable | Required | Default | How to obtain |
+|---|---|---|---|
+| `HWCLOUD_PROJECT_ID` | yes | — | Console **My Credentials → API Credentials** project list. |
+| `HWCLOUD_OIDC_ISSUER` | yes* | — | OIDC app / IdP **issuer URL**; endpoints auto-discovered from `<issuer>/.well-known/openid-configuration`. |
+| `HWCLOUD_OIDC_CLIENT_ID` | yes | — | OIDC application's **Client ID** (IAM Identity Center app details). |
+| `HWCLOUD_OIDC_CLIENT_SECRET` | no | empty | Only for a **confidential** client; omit for public/PKCE clients. |
+| `HWCLOUD_OIDC_AUTHORIZE_URL` / `HWCLOUD_OIDC_TOKEN_URL` | no | from issuer | Only if issuer discovery is unavailable — copy `authorization_endpoint` / `token_endpoint` from the discovery doc. |
+| `HWCLOUD_IDP_ID` | no* | — | Identity provider id, needed to exchange `id_token` for an IAM token (to call MaaS). |
+| `HWCLOUD_IAM_EXCHANGE_URL` | no | `https://iam.{region}.myhuaweicloud.com/v3.0/OS-AUTH/id-token/tokens` | Override only if different. |
+| `HWCLOUD_REGION` | no | `ap-southeast-1` | Region of your MaaS service. |
+| `HWCLOUD_TIMEZONE` | no | detected user tz | e.g. `Asia/Shanghai`. |
+| `HWCLOUD_OIDC_SCOPE` | no | `openid profile` | — |
+| `HWCLOUD_OIDC_PORT` | no | `8765` | Local callback port; the redirect URI must match. |
+| `HWCLOUD_TOKEN` / `HWCLOUD_AK`+`HWCLOUD_SK` / `MAAS_ENDPOINT` | no | — | Temporary-token override / optional AK-SK fallback / endpoint override. |
+
+`*` `HWCLOUD_IDP_ID` is required in the common federated setup where MaaS calls need an IAM token.
 
 ### Authentication (OIDC login)
 
@@ -58,7 +59,7 @@ python scripts/maas_statistics.py status    # show auth source / expiry
 python scripts/maas_statistics.py logout    # remove the saved token
 ```
 
-Configure the OIDC client with the env vars above (or matching `login` flags). The token is saved to `~/.config/huaweicloud-maas/token.json` with mode `0600` and used automatically by every command. `HWCLOUD_TOKEN` overrides it; `HWCLOUD_AK`+`HWCLOUD_SK` signing remains an optional fallback.
+Configure the OIDC client with the env vars above (or matching `login` flags). With **`HWCLOUD_OIDC_ISSUER` + `HWCLOUD_OIDC_CLIENT_ID`** the endpoints are auto-discovered, so you usually don't set the authorization/token URLs. The token is saved to `~/.config/huaweicloud-maas/token.json` with mode `0600` and used automatically by every command. `HWCLOUD_TOKEN` overrides it; `HWCLOUD_AK`+`HWCLOUD_SK` signing remains an optional fallback.
 
 #### One-time OIDC app registration (admin)
 
@@ -71,7 +72,17 @@ The OIDC application is created **once by an administrator of the Huawei Cloud t
 5. Copy the `client_id` (and `client_secret` only for a confidential client — keep it out of source control).
 6. To call MaaS, an **IAM token** is required: configure an identity provider / trust and set `HWCLOUD_IDP_ID` so the skill can exchange the OIDC `id_token` for an IAM `X-Auth-Token`. `HWCLOUD_IAM_EXCHANGE_URL` overrides the default `https://iam.{region}.myhuaweicloud.com/v3.0/OS-AUTH/id-token/tokens`.
 
-Distribution model: the tenant admin creates the app once and shares `client_id` (+ endpoints) with users; each user fills the env vars (or ships a `.env`) and runs `login`. A ready template is provided in [`.env.example`](.env.example).
+Distribution model: the tenant admin creates the app once and shares `client_id` (+ issuer/endpoints) with users; each user fills the env vars (or ships a `.env`) and runs `login`. A ready template is provided in [`.env.example`](.env.example).
+
+#### How to obtain the values
+
+1. **Project ID** — Huawei Cloud console → account menu (top-right) → **My Credentials → API Credentials**; find the Project ID for the target region (or pass `--project-id`).
+2. **Issuer / authorize / token endpoints** — open the OIDC application details, or visit `https://<issuer>/.well-known/openid-configuration`; use its `issuer`, `authorization_endpoint`, `token_endpoint`. Usually you only need to give the skill the **issuer** — endpoints are auto-discovered.
+3. **Client ID / Client Secret** — from **IAM Identity Center → Applications → (your OIDC app) → Credentials**. Public/native clients (PKCE) have no secret.
+4. **IDP_ID** — from **IAM → Identity Providers**; the IdP used for federated login (needed to exchange the `id_token` for an IAM token).
+5. **Region** — the region where your MaaS service runs (default `ap-southeast-1`).
+
+When registering the OIDC app, set the **Redirect URI** to `http://127.0.0.1:8765/callback` (must match `HWCLOUD_OIDC_PORT`).
 
 ### Timezone
 

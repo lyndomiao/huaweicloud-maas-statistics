@@ -395,6 +395,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
 def _oidc_config(args):
     env = os.environ
     return {
+        "issuer": getattr(args, "issuer", None) or env.get("HWCLOUD_OIDC_ISSUER", ""),
         "authorize_url": getattr(args, "authorize_url", None) or env.get("HWCLOUD_OIDC_AUTHORIZE_URL", ""),
         "token_url": getattr(args, "token_url", None) or env.get("HWCLOUD_OIDC_TOKEN_URL", ""),
         "client_id": getattr(args, "client_id", None) or env.get("HWCLOUD_OIDC_CLIENT_ID", ""),
@@ -406,6 +407,17 @@ def _oidc_config(args):
         "idp_id": env.get("HWCLOUD_IDP_ID", ""),
         "timeout": int(getattr(args, "timeout", None) or env.get("HWCLOUD_OIDC_TIMEOUT", "300")),
     }
+
+
+def _oidc_discover(issuer):
+    """Fetch <issuer>/.well-known/openid-configuration and return endpoint metadata."""
+    url = issuer.rstrip("/") + "/.well-known/openid-configuration"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        raise SystemExit("OIDC discovery failed at %s: %s" % (url, e))
 
 
 def _exchange_code(oc, code, redirect_uri, verifier):
@@ -449,17 +461,19 @@ def _exchange_id_token_for_iam(cfg, oc, id_token):
 
 def cmd_login(cfg, args):
     oc = _oidc_config(args)
+    if oc["issuer"] and (not oc["authorize_url"] or not oc["token_url"]):
+        doc = _oidc_discover(oc["issuer"])
+        oc["authorize_url"] = oc["authorize_url"] or doc.get("authorization_endpoint", "")
+        oc["token_url"] = oc["token_url"] or doc.get("token_endpoint", "")
     missing = [k for k in ("authorize_url", "token_url", "client_id") if not oc[k]]
     if missing:
         raise SystemExit(
-            "OIDC login is not configured. Set (env or flags):\n"
-            "  HWCLOUD_OIDC_AUTHORIZE_URL   authorization endpoint\n"
-            "  HWCLOUD_OIDC_TOKEN_URL       token endpoint\n"
-            "  HWCLOUD_OIDC_CLIENT_ID       OIDC client id\n"
-            "  HWCLOUD_OIDC_CLIENT_SECRET   optional (confidential client)\n"
-            "  HWCLOUD_OIDC_SCOPE           optional, default 'openid profile'\n"
-            "  HWCLOUD_OIDC_PORT            optional local callback port, default 8765\n"
-            "  HWCLOUD_IDP_ID + HWCLOUD_IAM_EXCHANGE_URL  optional: exchange id_token for IAM token")
+            "OIDC login is not configured.\n"
+            "  Minimal: HWCLOUD_OIDC_ISSUER + HWCLOUD_OIDC_CLIENT_ID (endpoints auto-discovered), or\n"
+            "           HWCLOUD_OIDC_AUTHORIZE_URL + HWCLOUD_OIDC_TOKEN_URL + HWCLOUD_OIDC_CLIENT_ID.\n"
+            "  Optional: HWCLOUD_OIDC_CLIENT_SECRET (confidential client), HWCLOUD_OIDC_SCOPE,\n"
+            "            HWCLOUD_OIDC_PORT, and HWCLOUD_IDP_ID (+ HWCLOUD_IAM_EXCHANGE_URL) to exchange\n"
+            "            the id_token for an IAM token.")
     port = oc["port"]
     redirect_uri = "http://127.0.0.1:%d%s" % (port, oc["redirect_path"])
     verifier, challenge = _pkce_pair()
@@ -1399,6 +1413,7 @@ def build_parser():
     sp_b.set_defaults(func=cmd_billing)
 
     sp_login = sub.add_parser("login", help="Log in via OIDC Authorization Code (+PKCE)", parents=[common])
+    sp_login.add_argument("--issuer", help="OIDC issuer URL (auto-discovers endpoints)")
     sp_login.add_argument("--authorize-url", help="OIDC authorization endpoint")
     sp_login.add_argument("--token-url", help="OIDC token endpoint")
     sp_login.add_argument("--client-id", help="OIDC client id")

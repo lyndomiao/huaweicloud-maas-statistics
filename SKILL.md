@@ -22,7 +22,7 @@ Query online-inference model usage via Huawei Cloud **MaaS (Model as a Service) 
 ## Setup
 Auth (recommended): run `login` (OIDC Authorization Code + PKCE). The temporary token is stored at `~/.config/huaweicloud-maas/token.json` (mode 0600) and used automatically; no AK/SK stored.
 Required: `HWCLOUD_PROJECT_ID` (or `--project-id`).
-OIDC config: `HWCLOUD_OIDC_AUTHORIZE_URL`, `HWCLOUD_OIDC_TOKEN_URL`, `HWCLOUD_OIDC_CLIENT_ID`, optional `HWCLOUD_OIDC_CLIENT_SECRET`, `HWCLOUD_OIDC_SCOPE`, `HWCLOUD_OIDC_PORT`; optional `HWCLOUD_IDP_ID` + `HWCLOUD_IAM_EXCHANGE_URL` to exchange `id_token` for an IAM token.
+OIDC config (minimal): `HWCLOUD_OIDC_ISSUER` + `HWCLOUD_OIDC_CLIENT_ID` (endpoints auto-discovered from `/.well-known/openid-configuration`; or set `HWCLOUD_OIDC_AUTHORIZE_URL`+`HWCLOUD_OIDC_TOKEN_URL` explicitly). Optional: `HWCLOUD_OIDC_CLIENT_SECRET` (confidential client), `HWCLOUD_OIDC_SCOPE`, `HWCLOUD_OIDC_PORT`; `HWCLOUD_IDP_ID` + `HWCLOUD_IAM_EXCHANGE_URL` to exchange `id_token` for an IAM token.
 Optional: `HWCLOUD_REGION` (default `ap-southeast-1`), `HWCLOUD_TIMEZONE` (user timezone; default = saved/detected), `HWCLOUD_TOKEN` (override), `MAAS_ENDPOINT`. AK/SK (`HWCLOUD_AK`/`HWCLOUD_SK`) remain a fallback.
 
 ## Usage
