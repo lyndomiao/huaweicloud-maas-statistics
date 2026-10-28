@@ -60,6 +60,19 @@ python scripts/maas_statistics.py logout    # remove the saved token
 
 Configure the OIDC client with the env vars above (or matching `login` flags). The token is saved to `~/.config/huaweicloud-maas/token.json` with mode `0600` and used automatically by every command. `HWCLOUD_TOKEN` overrides it; `HWCLOUD_AK`+`HWCLOUD_SK` signing remains an optional fallback.
 
+#### One-time OIDC app registration (admin)
+
+The OIDC application is created **once by an administrator of the Huawei Cloud tenant** (in IAM Identity Center). End users do **not** create it — they only run `login` with the provided configuration.
+
+1. Sign in to **Huawei Cloud IAM Identity Center** as an administrator.
+2. Create an **OIDC application**. Prefer a **public/native client with PKCE** (no `client_secret`), so the `client_id` can be shared safely.
+3. Set the **redirect URI** exactly to `http://127.0.0.1:8765/callback` (or match your `HWCLOUD_OIDC_PORT`).
+4. Enable grant type **authorization_code** with **PKCE (S256)**; scopes `openid profile`.
+5. Copy the `client_id` (and `client_secret` only for a confidential client — keep it out of source control).
+6. To call MaaS, an **IAM token** is required: configure an identity provider / trust and set `HWCLOUD_IDP_ID` so the skill can exchange the OIDC `id_token` for an IAM `X-Auth-Token`. `HWCLOUD_IAM_EXCHANGE_URL` overrides the default `https://iam.{region}.myhuaweicloud.com/v3.0/OS-AUTH/id-token/tokens`.
+
+Distribution model: the tenant admin creates the app once and shares `client_id` (+ endpoints) with users; each user fills the env vars (or ships a `.env`) and runs `login`. A ready template is provided in [`.env.example`](.env.example).
+
 ### Timezone
 
 Times default to the **user's current timezone**, resolved in this order:
@@ -174,3 +187,4 @@ Charts are written to `./maas_charts/` (`token_donut_*.png`, `cost_donut_*.png`)
 | `SKILL.md` | Agent-facing skill metadata and usage. |
 | `references/api-reference.md` | API request/response field reference. |
 | `README.md` | This document. |
+| `.env.example` | Environment template for OIDC / region / timezone. |
