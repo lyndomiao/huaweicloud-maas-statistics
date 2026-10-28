@@ -17,7 +17,7 @@ A command-line skill that reports **Huawei Cloud MaaS (Model as a Service)** onl
 ## Requirements
 
 - Python 3.9+ (standard library only).
-- A Huawei Cloud account with MaaS enabled, and an AK/SK (or a temporary token) plus the project ID.
+- A Huawei Cloud account with MaaS enabled and the project ID. Authentication uses **OIDC login** (Authorization Code + PKCE); AK/SK remain an optional fallback.
 - Network access to `modelarts.{region}.myhuaweicloud.com` and (for billing) `bss-intl.myhuaweicloud.com`.
 
 ## Installation
@@ -34,16 +34,31 @@ Credentials and defaults are read from environment variables (or flags):
 
 | Variable | Required | Description |
 |---|---|---|
-| `HWCLOUD_AK` | yes\* | Access key ID |
-| `HWCLOUD_SK` | yes\* | Secret access key (never printed) |
 | `HWCLOUD_PROJECT_ID` | yes | Project ID (or `--project-id`) |
-| `HWCLOUD_TOKEN` | alt\* | Temporary `X-Auth-Token` instead of AK/SK |
+| `HWCLOUD_OIDC_AUTHORIZE_URL` | login | OIDC authorization endpoint |
+| `HWCLOUD_OIDC_TOKEN_URL` | login | OIDC token endpoint |
+| `HWCLOUD_OIDC_CLIENT_ID` | login | OIDC client id |
+| `HWCLOUD_OIDC_CLIENT_SECRET` | no | OIDC client secret (confidential client) |
+| `HWCLOUD_OIDC_SCOPE` | no | OIDC scope, default `openid profile` |
+| `HWCLOUD_OIDC_PORT` | no | Local callback port, default `8765` |
+| `HWCLOUD_IDP_ID` + `HWCLOUD_IAM_EXCHANGE_URL` | no | Exchange `id_token` for an IAM token |
 | `HWCLOUD_REGION` | no | Region, default `ap-southeast-1` |
 | `HWCLOUD_TIMEZONE` | no | User timezone, e.g. `Asia/Shanghai` |
+| `HWCLOUD_TOKEN` | no | Override the saved token with a temporary `X-Auth-Token` |
+| `HWCLOUD_AK` / `HWCLOUD_SK` | no | Optional fallback: AK/SK signing |
 | `MAAS_ENDPOINT` | no | Override the MaaS endpoint host |
-| `HWCLOUD_AUTH_STYLE` | no | `access` (default) or `credential` signing |
 
-\* Provide either `HWCLOUD_AK` + `HWCLOUD_SK`, or `HWCLOUD_TOKEN`.
+### Authentication (OIDC login)
+
+Recommended: **OIDC Authorization Code + PKCE**. The user logs in through the browser; the skill receives the authorization code on a local callback (`http://127.0.0.1:<port>/callback`), exchanges it for tokens, and stores only a temporary token — **no AK/SK is stored**.
+
+```bash
+python scripts/maas_statistics.py login     # opens the browser, waits for the callback
+python scripts/maas_statistics.py status    # show auth source / expiry
+python scripts/maas_statistics.py logout    # remove the saved token
+```
+
+Configure the OIDC client with the env vars above (or matching `login` flags). The token is saved to `~/.config/huaweicloud-maas/token.json` with mode `0600` and used automatically by every command. `HWCLOUD_TOKEN` overrides it; `HWCLOUD_AK`+`HWCLOUD_SK` signing remains an optional fallback.
 
 ### Timezone
 
@@ -64,20 +79,24 @@ Note: no timezone specified; using detected user timezone Africa/Nairobi (UTC+03
 ## Quick start
 
 ```bash
-export HWCLOUD_AK=...        # your access key
-export HWCLOUD_SK=...        # your secret key
 export HWCLOUD_PROJECT_ID=...
+# OIDC config (for login):
+export HWCLOUD_OIDC_AUTHORIZE_URL=... HWCLOUD_OIDC_TOKEN_URL=... HWCLOUD_OIDC_CLIENT_ID=...
 
-# 1) Verify signing against the official example (no credentials needed)
+# 1) Log in via OIDC Authorization Code + PKCE (no AK/SK stored)
+python scripts/maas_statistics.py login
+python scripts/maas_statistics.py status
+
+# 2) Verify signing against the official example (no credentials needed)
 python scripts/maas_statistics.py selftest
 
-# 2) Aggregate summary for the last 24 hours
+# 3) Aggregate summary for the last 24 hours
 python scripts/maas_statistics.py summary --last 24h
 
-# 3) Per-model table + cost + charts for yesterday (preset services)
+# 4) Per-model table + cost + charts for yesterday (preset services)
 python scripts/maas_statistics.py services --last 24h --service-type 2 --all
 
-# 4) Per-model cost from the official bill for a single day
+# 5) Per-model cost from the official bill for a single day
 python scripts/maas_statistics.py billing --date 2026-10-27
 ```
 
@@ -89,6 +108,9 @@ python scripts/maas_statistics.py billing --date 2026-10-27
 | `services` | Per-model requests, error rate, tokens, cache hit ratio, cost, two donut charts (+ optional latency / token size). |
 | `ips` | Caller source IP list. |
 | `billing` | Per-model real cost from the official bill (OCE `res-fee-records`). |
+| `login` | OIDC Authorization Code (+PKCE) browser login; stores a temporary token (`0600`). |
+| `logout` | Remove the saved login token. |
+| `status` | Show auth source / region / project / token expiry. |
 | `selftest` | Verify AK/SK signing against the official example hash (no credentials needed). |
 
 ## Common parameters
@@ -140,7 +162,9 @@ Charts are written to `./maas_charts/` (`token_donut_*.png`, `cost_donut_*.png`)
 
 ## Security
 
-- The SK is used only for request signing and is **never printed**. Use `--dry-run` to inspect the signed request with secrets redacted.
+- Authentication is via a **temporary OIDC token** stored at `~/.config/huaweicloud-maas/token.json` with mode `0600`; the login flow stores no AK/SK.
+- Tokens and any SK are **never printed**. `--dry-run` shows the request with `Authorization` / `X-Auth-Token` fully redacted (`***`).
+- If you use the optional AK/SK fallback, keep them in environment variables or a secret manager — never commit them.
 
 ## Files
 

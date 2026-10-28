@@ -9,16 +9,20 @@ MAAS_ENDPOINT, HWCLOUD_AUTH_STYLE. Run `selftest` to verify signing.
 """
 
 import argparse
+import base64
 import hashlib
 import hmac
+import http.server
 import json
 import os
 import re
+import secrets
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from datetime import datetime, timedelta, timezone
 
 try:
@@ -288,11 +292,276 @@ class ApiError(Exception):
         self.status, self.code, self.msg, self.body = status, code, msg, body
 
 
+# ---------------------------------------------------------------------------
+# Auth: OIDC Authorization Code (+PKCE) login; token storage. No AK/SK needed.
+# ---------------------------------------------------------------------------
+CONFIG_DIR = os.path.expanduser("~/.config/huaweicloud-maas")
+
+
+def _token_file():
+    return os.environ.get("HWCLOUD_TOKEN_FILE") or os.path.join(CONFIG_DIR, "token.json")
+
+
+def _run_quiet(cmd):
+    try:
+        import subprocess
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except Exception:
+        pass
+
+
+def _save_token(data):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    path = _token_file()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+    try:
+        if os.name == "nt":
+            user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+            if user:
+                _run_quiet(["icacls", path, "/inheritance:r", "/grant:r", "%s:F" % user])
+        else:
+            os.chmod(path, 0o600)
+    except Exception:
+        pass
+    return path
+
+
+def _load_token_data():
+    try:
+        with open(_token_file(), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _clear_token():
+    try:
+        os.remove(_token_file())
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def _token_expired(data):
+    exp = (data or {}).get("expires_at")
+    if not exp:
+        return False
+    try:
+        return time.time() > float(exp) - 60
+    except Exception:
+        return False
+
+
+def _stored_token():
+    """Return a usable X-Auth-Token from a previous OIDC login, or None."""
+    data = _load_token_data()
+    if not data or _token_expired(data):
+        return None
+    return data.get("api_token") or data.get("access_token") or data.get("id_token")
+
+
+def _b64url(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+
+def _pkce_pair():
+    verifier = _b64url(secrets.token_bytes(48))
+    challenge = _b64url(hashlib.sha256(verifier.encode("ascii")).digest())
+    return verifier, challenge
+
+
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        self.server.result = q  # type: ignore
+        body = ("<html><body style='font-family:sans-serif'>"
+                "<h3>Login received</h3><p>You can close this window and return to the terminal.</p>"
+                "</body></html>").encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+def _oidc_config(args):
+    env = os.environ
+    return {
+        "authorize_url": getattr(args, "authorize_url", None) or env.get("HWCLOUD_OIDC_AUTHORIZE_URL", ""),
+        "token_url": getattr(args, "token_url", None) or env.get("HWCLOUD_OIDC_TOKEN_URL", ""),
+        "client_id": getattr(args, "client_id", None) or env.get("HWCLOUD_OIDC_CLIENT_ID", ""),
+        "client_secret": getattr(args, "client_secret", None) or env.get("HWCLOUD_OIDC_CLIENT_SECRET", ""),
+        "scope": getattr(args, "scope", None) or env.get("HWCLOUD_OIDC_SCOPE", "openid profile"),
+        "port": int(getattr(args, "port", None) or env.get("HWCLOUD_OIDC_PORT", "8765")),
+        "redirect_path": "/callback",
+        "exchange_url": env.get("HWCLOUD_IAM_EXCHANGE_URL", ""),
+        "idp_id": env.get("HWCLOUD_IDP_ID", ""),
+        "timeout": int(getattr(args, "timeout", None) or env.get("HWCLOUD_OIDC_TIMEOUT", "300")),
+    }
+
+
+def _exchange_code(oc, code, redirect_uri, verifier):
+    form = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": oc["client_id"],
+        "code_verifier": verifier,
+    }
+    data = urllib.parse.urlencode(form).encode("utf-8")
+    headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
+    if oc["client_secret"]:
+        basic = base64.b64encode(("%s:%s" % (oc["client_id"], oc["client_secret"])).encode()).decode()
+        headers["Authorization"] = "Basic " + basic
+    req = urllib.request.Request(oc["token_url"], data=data, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        raise SystemExit("Token exchange failed (HTTP %s): %s" % (e.code, raw))
+
+
+def _exchange_id_token_for_iam(cfg, oc, id_token):
+    url = oc["exchange_url"] or ("https://iam.%s.myhuaweicloud.com/v3.0/OS-AUTH/id-token/tokens" % cfg.region)
+    body = {"auth": {"id_token": {"id": id_token, "idp_id": oc["idp_id"]}}}
+    if cfg.project_id:
+        body["auth"]["scope"] = {"project": {"id": cfg.project_id}}
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            subj = resp.headers.get("X-Subject-Token")
+            obj = json.loads(resp.read().decode("utf-8") or "{}")
+            return subj, (obj.get("token") or {}).get("expires_at")
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        raise SystemExit("IAM id-token exchange failed (HTTP %s): %s" % (e.code, raw))
+
+
+def cmd_login(cfg, args):
+    oc = _oidc_config(args)
+    missing = [k for k in ("authorize_url", "token_url", "client_id") if not oc[k]]
+    if missing:
+        raise SystemExit(
+            "OIDC login is not configured. Set (env or flags):\n"
+            "  HWCLOUD_OIDC_AUTHORIZE_URL   authorization endpoint\n"
+            "  HWCLOUD_OIDC_TOKEN_URL       token endpoint\n"
+            "  HWCLOUD_OIDC_CLIENT_ID       OIDC client id\n"
+            "  HWCLOUD_OIDC_CLIENT_SECRET   optional (confidential client)\n"
+            "  HWCLOUD_OIDC_SCOPE           optional, default 'openid profile'\n"
+            "  HWCLOUD_OIDC_PORT            optional local callback port, default 8765\n"
+            "  HWCLOUD_IDP_ID + HWCLOUD_IAM_EXCHANGE_URL  optional: exchange id_token for IAM token")
+    port = oc["port"]
+    redirect_uri = "http://127.0.0.1:%d%s" % (port, oc["redirect_path"])
+    verifier, challenge = _pkce_pair()
+    state = _b64url(secrets.token_bytes(16))
+    params = {
+        "response_type": "code",
+        "client_id": oc["client_id"],
+        "redirect_uri": redirect_uri,
+        "scope": oc["scope"],
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    auth_url = oc["authorize_url"] + ("&" if "?" in oc["authorize_url"] else "?") + urllib.parse.urlencode(params)
+    try:
+        httpd = http.server.HTTPServer(("127.0.0.1", port), _CallbackHandler)
+    except OSError as e:
+        raise SystemExit("Cannot bind local callback port %d: %s (set HWCLOUD_OIDC_PORT)" % (port, e))
+    httpd.result = None  # type: ignore
+    print("Opening browser for login. If it does not open, visit:\n  %s" % auth_url)
+    try:
+        webbrowser.open(auth_url)
+    except Exception:
+        pass
+    print("Waiting for the login callback on %s (timeout %ds)..." % (redirect_uri, oc["timeout"]))
+    import threading
+    t = threading.Thread(target=httpd.handle_request, daemon=True)
+    t.start()
+    t.join(oc["timeout"])
+    result = httpd.result
+    try:
+        httpd.server_close()
+    except Exception:
+        pass
+    if not result:
+        raise SystemExit("Login timed out / cancelled (no callback received).")
+    if result.get("error"):
+        raise SystemExit("Authorization failed: %s %s" % (
+            (result.get("error") or [""])[0], (result.get("error_description") or [""])[0]))
+    if (result.get("state") or [""])[0] != state:
+        raise SystemExit("OAuth state mismatch; aborting for safety.")
+    code = (result.get("code") or [""])[0]
+    if not code:
+        raise SystemExit("No authorization code returned.")
+
+    tok = _exchange_code(oc, code, redirect_uri, verifier)
+    access, id_tok, refresh = tok.get("access_token"), tok.get("id_token"), tok.get("refresh_token")
+    expires_in = tok.get("expires_in")
+    record = {
+        "access_token": access,
+        "id_token": id_tok,
+        "refresh_token": refresh,
+        "token_type": tok.get("token_type"),
+        "expires_at": (time.time() + float(expires_in)) if expires_in else None,
+        "obtained_at": time.time(),
+        "api_token": access,
+    }
+    if oc["idp_id"] and id_tok:
+        iam_tok, iam_exp = _exchange_id_token_for_iam(cfg, oc, id_tok)
+        if iam_tok:
+            record["api_token"] = iam_tok
+            if iam_exp:
+                record["expires_at"] = iam_exp
+    path = _save_token(record)
+    when = (datetime.fromtimestamp(record["expires_at"]).strftime("%Y-%m-%d %H:%M:%S")
+            if record.get("expires_at") else "unknown")
+    print("Login successful. Token saved to %s (expires: %s)." % (path, when))
+    return 0
+
+
+def cmd_logout(cfg, args):
+    print("Logged out: removed saved token." if _clear_token() else "No saved token to remove.")
+    return 0
+
+
+def cmd_status(cfg, args):
+    data = _load_token_data()
+    env_tok = os.environ.get("HWCLOUD_TOKEN") or os.environ.get("MAAS_TOKEN")
+    if env_tok:
+        src = "env HWCLOUD_TOKEN"
+    elif data and not _token_expired(data):
+        src = "login token (%s)" % _token_file()
+    elif data and _token_expired(data):
+        exp = datetime.fromtimestamp(data["expires_at"]).strftime("%Y-%m-%d %H:%M:%S") if data.get("expires_at") else "?"
+        src = "login token EXPIRED on %s -> run `login` again" % exp
+    elif cfg.ak and cfg.sk:
+        src = "AK/SK (env)"
+    else:
+        src = "none -> run `login`"
+    print("Auth source :", src)
+    print("Region      :", cfg.region)
+    print("Project ID  :", cfg.project_id or "(not set)")
+    if data and data.get("expires_at"):
+        print("Token expiry:", datetime.fromtimestamp(data["expires_at"]).strftime("%Y-%m-%d %H:%M:%S"))
+    return 0
+
+
 class Config:
     def __init__(self, args):
         self.ak = os.environ.get("HWCLOUD_AK") or os.environ.get("HUAWEICLOUD_SDK_AK")
         self.sk = os.environ.get("HWCLOUD_SK") or os.environ.get("HUAWEICLOUD_SDK_SK")
-        self.token = os.environ.get("HWCLOUD_TOKEN") or os.environ.get("MAAS_TOKEN")
+        self.token = os.environ.get("HWCLOUD_TOKEN") or os.environ.get("MAAS_TOKEN") or _stored_token()
         self.project_id = args.project_id or os.environ.get("HWCLOUD_PROJECT_ID")
         self.region = args.region or os.environ.get("HWCLOUD_REGION") or DEFAULT_REGION
         self.timezone = args.timezone or _local_tz_name()
@@ -306,7 +575,7 @@ class Config:
         if need_project and not self.project_id:
             raise SystemExit("Missing project ID: set HWCLOUD_PROJECT_ID or pass --project-id.")
         if not self.token and not (self.ak and self.sk):
-            raise SystemExit("Missing credentials: set HWCLOUD_AK / HWCLOUD_SK, or HWCLOUD_TOKEN.")
+            raise SystemExit("Missing credentials: run `login` (OIDC), or set HWCLOUD_TOKEN / HWCLOUD_AK+HWCLOUD_SK.")
 
 
 def call_api(cfg, path, body, method="POST"):
@@ -324,8 +593,8 @@ def call_api(cfg, path, body, method="POST"):
         for k in ("Host", "X-Auth-Token", "X-Sdk-Date", "Content-Type", "Authorization"):
             if k in headers:
                 v = headers[k]
-                if k in ("X-Auth-Token", "Authorization") and len(v) > 20:
-                    v = v[:20] + "..."
+                if k in ("X-Auth-Token", "Authorization"):
+                    v = "***"
                 print("  %s: %s" % (k, v))
         if body_bytes:
             print("  body: " + body_bytes.decode("utf-8"))
@@ -836,8 +1105,8 @@ def _billing_get(cfg, url):
         for k in ("Host", "X-Auth-Token", "X-Sdk-Date", "Authorization"):
             if k in headers:
                 v = headers[k]
-                if k in ("X-Auth-Token", "Authorization") and len(v) > 20:
-                    v = v[:20] + "..."
+                if k in ("X-Auth-Token", "Authorization"):
+                    v = "***"
                 print("  %s: %s" % (k, v))
         return {"_dry_run": True}
     req = urllib.request.Request(url, method="GET")
@@ -1129,6 +1398,19 @@ def build_parser():
     sp_b.add_argument("--json", action="store_true", help="Print JSON")
     sp_b.set_defaults(func=cmd_billing)
 
+    sp_login = sub.add_parser("login", help="Log in via OIDC Authorization Code (+PKCE)", parents=[common])
+    sp_login.add_argument("--authorize-url", help="OIDC authorization endpoint")
+    sp_login.add_argument("--token-url", help="OIDC token endpoint")
+    sp_login.add_argument("--client-id", help="OIDC client id")
+    sp_login.add_argument("--client-secret", help="OIDC client secret (optional)")
+    sp_login.add_argument("--scope", help="OIDC scope (default 'openid profile')")
+    sp_login.add_argument("--port", type=int, help="Local callback port (default 8765)")
+    sp_login.add_argument("--timeout", type=int, help="Login wait timeout seconds (default 300)")
+    sp_login.set_defaults(func=cmd_login)
+
+    sub.add_parser("logout", help="Remove the saved login token", parents=[common]).set_defaults(func=cmd_logout)
+    sub.add_parser("status", help="Show auth source / region / project", parents=[common]).set_defaults(func=cmd_status)
+
     sub.add_parser("selftest", help="Verify signing (official example)").set_defaults(
         func=lambda c, a: _selftest())
     return p
@@ -1146,7 +1428,8 @@ def main():
     try:
         cfg = Config(args)
         if not args.dry_run:
-            cfg.require(need_project=(args.command != "billing"))
+            if args.command not in ("login", "logout", "status"):
+                cfg.require(need_project=(args.command != "billing"))
         else:
             if not cfg.project_id:
                 cfg.project_id = "<PROJECT_ID>"

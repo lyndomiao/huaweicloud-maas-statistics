@@ -6,7 +6,7 @@ whenToUse: The user has Huawei Cloud MaaS (Model as a Service) services (preset 
 
 # Huawei Cloud MaaS Statistics
 
-Query online-inference model usage via Huawei Cloud **MaaS (Model as a Service) monitoring APIs**. Ships `scripts/maas_statistics.py` (Python 3 stdlib only; handles AK/SK `SDK-HMAC-SHA256` signing automatically).
+Query online-inference model usage via Huawei Cloud **MaaS (Model as a Service) monitoring APIs**. Ships `scripts/maas_statistics.py` (Python 3 stdlib only; supports OIDC browser login — Authorization Code + PKCE — and optional AK/SK `SDK-HMAC-SHA256` signing).
 
 ## Subcommands
 | Subcommand | Purpose |
@@ -15,13 +15,20 @@ Query online-inference model usage via Huawei Cloud **MaaS (Model as a Service) 
 | `services` | Per-model requests, error rate, tokens, cache hit ratio, cost (+ optional latency / token size) |
 | `ips` | Caller source IP list |
 | `billing` | Per-model real cost from the official bill (OCE `res-fee-records`) |
+| `login` | OIDC Authorization Code (+PKCE) browser login; stores a temporary token (0600) |
+| `logout` | Remove the saved login token |
+| `status` | Show auth source / region / project / token expiry |
 
 ## Setup
-Required env: `HWCLOUD_AK`, `HWCLOUD_SK`, `HWCLOUD_PROJECT_ID` (or `--project-id`).
-Optional: `HWCLOUD_REGION` (default `ap-southeast-1`), `HWCLOUD_TIMEZONE` (user timezone; default = saved/detected user timezone), `HWCLOUD_TOKEN`, `MAAS_ENDPOINT`, `HWCLOUD_AUTH_STYLE`.
+Auth (recommended): run `login` (OIDC Authorization Code + PKCE). The temporary token is stored at `~/.config/huaweicloud-maas/token.json` (mode 0600) and used automatically; no AK/SK stored.
+Required: `HWCLOUD_PROJECT_ID` (or `--project-id`).
+OIDC config: `HWCLOUD_OIDC_AUTHORIZE_URL`, `HWCLOUD_OIDC_TOKEN_URL`, `HWCLOUD_OIDC_CLIENT_ID`, optional `HWCLOUD_OIDC_CLIENT_SECRET`, `HWCLOUD_OIDC_SCOPE`, `HWCLOUD_OIDC_PORT`; optional `HWCLOUD_IDP_ID` + `HWCLOUD_IAM_EXCHANGE_URL` to exchange `id_token` for an IAM token.
+Optional: `HWCLOUD_REGION` (default `ap-southeast-1`), `HWCLOUD_TIMEZONE` (user timezone; default = saved/detected), `HWCLOUD_TOKEN` (override), `MAAS_ENDPOINT`. AK/SK (`HWCLOUD_AK`/`HWCLOUD_SK`) remain a fallback.
 
 ## Usage
 ```bash
+python scripts/maas_statistics.py login                    # OIDC browser login (Authorization Code + PKCE)
+python scripts/maas_statistics.py status                   # show auth source / expiry
 python scripts/maas_statistics.py selftest                 # verify signing (no creds)
 python scripts/maas_statistics.py summary --last 24h
 python scripts/maas_statistics.py services --last 24h --service-type 2 --all
@@ -44,5 +51,5 @@ python scripts/maas_statistics.py billing --date 2026-10-27 --timezone Africa/Na
 - Region defaults to `ap-southeast-1`; pass `--region` if your resources are elsewhere. Rate limit ~200 req/min/user (HTTP 429 → wait 60s).
 - Times use the **user's current timezone**, resolved in order: `--timezone` → `HWCLOUD_TIMEZONE` → saved `~/.config/huaweicloud-maas/timezone` → OS detection. When timezone is omitted, the output explicitly notes the detected user timezone used. Do not assume the server/machine timezone.
 - `cost(USD)` = billed `amount` aligned to the same local-time window (hourly detail). Bill has hour-level latency and is same-calendar-month only.
-- Token unit is million tokens. Never expose the SK; use `--dry-run` to inspect requests.
+- Token unit is million tokens. Never expose tokens or any SK; use `--dry-run` to inspect requests (auth headers redacted).
 - Full request/response fields: `references/api-reference.md`.
