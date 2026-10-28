@@ -16,11 +16,13 @@ Query online-inference model usage via Huawei Cloud **MaaS (Model as a Service) 
 | `ips` | Caller source IP list |
 | `billing` | Per-model real cost from the official bill (OCE `res-fee-records`) |
 | `login` | OIDC Authorization Code (+PKCE) browser login; stores a temporary token (0600) |
+| `capture` | Capture a Huawei Cloud console login token via a one-click bookmarklet (no AK/SK; works for any account) |
 | `logout` | Remove the saved login token |
 | `status` | Show auth source / region / project / token expiry |
 
 ## Setup
 Auth (recommended): run `login` (OIDC Authorization Code + PKCE). The temporary token is stored at `~/.config/huaweicloud-maas/token.json` (mode 0600) and used automatically; no AK/SK stored.
+No OIDC / different accounts: run `capture` — the user signs in to the Huawei Cloud console in the same browser, clicks a one-click bookmarklet, and the console token is validated and saved (no AK/SK). Temporary (hours~1 day); prefer a read-only sub-account.
 Required: `HWCLOUD_PROJECT_ID` (or `--project-id`).
 OIDC config (minimal): `HWCLOUD_OIDC_ISSUER` + `HWCLOUD_OIDC_CLIENT_ID` (endpoints auto-discovered from `/.well-known/openid-configuration`; or set `HWCLOUD_OIDC_AUTHORIZE_URL`+`HWCLOUD_OIDC_TOKEN_URL` explicitly). Optional: `HWCLOUD_OIDC_CLIENT_SECRET` (confidential client), `HWCLOUD_OIDC_SCOPE`, `HWCLOUD_OIDC_PORT`; `HWCLOUD_IDP_ID` + `HWCLOUD_IAM_EXCHANGE_URL` to exchange `id_token` for an IAM token.
 Optional: `HWCLOUD_REGION` (default `ap-southeast-1`), `HWCLOUD_TIMEZONE` (user timezone; default = saved/detected), `HWCLOUD_TOKEN` (override), `MAAS_ENDPOINT`. AK/SK (`HWCLOUD_AK`/`HWCLOUD_SK`) remain a fallback.
@@ -28,6 +30,7 @@ Optional: `HWCLOUD_REGION` (default `ap-southeast-1`), `HWCLOUD_TIMEZONE` (user 
 ## Usage
 ```bash
 python scripts/maas_statistics.py login                    # OIDC browser login (Authorization Code + PKCE)
+python scripts/maas_statistics.py capture                  # no-AK/SK: capture console token via bookmarklet
 python scripts/maas_statistics.py status                   # show auth source / expiry
 python scripts/maas_statistics.py selftest                 # verify signing (no creds)
 python scripts/maas_statistics.py summary --last 24h

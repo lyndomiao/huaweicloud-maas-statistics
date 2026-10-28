@@ -84,6 +84,25 @@ Distribution model: the tenant admin creates the app once and shares `client_id`
 
 When registering the OIDC app, set the **Redirect URI** to `http://127.0.0.1:8765/callback` (must match `HWCLOUD_OIDC_PORT`).
 
+### Console token capture (no AK/SK; any Huawei Cloud account)
+
+When OIDC is unavailable and users have **different Huawei Cloud accounts**, `capture` lets each user reuse their **browser console login** — no AK/SK, no app registration.
+
+```bash
+python scripts/maas_statistics.py capture      # starts a local helper and opens a page
+```
+
+1. In the **same browser**, sign in to the Huawei Cloud console (any account/region).
+2. On the helper page, drag the **"Capture" bookmarklet** to the bookmarks bar (one time).
+3. On the console tab, click the bookmarklet. It sends the current login token to the local helper, which validates it and saves it (mode `0600`).
+4. Run queries as usual.
+
+Tradeoffs:
+- The token is **temporary** (hours to ~1 day); when it expires, just click the bookmarklet again.
+- It carries the **account's full permissions** — prefer signing in with a **read-only sub-account**.
+- If the bookmarklet can't find the token, paste **`X-Auth-Token`** (DevTools → Network → any request header) into the helper page.
+- Saved at `~/.config/huaweicloud-maas/token.json`; `status` / `logout` manage it.
+
 ### Timezone
 
 Times default to the **user's current timezone**, resolved in this order:
@@ -133,6 +152,7 @@ python scripts/maas_statistics.py billing --date 2026-10-27
 | `ips` | Caller source IP list. |
 | `billing` | Per-model real cost from the official bill (OCE `res-fee-records`). |
 | `login` | OIDC Authorization Code (+PKCE) browser login; stores a temporary token (`0600`). |
+| `capture` | Capture a Huawei Cloud console login token via a one-click bookmarklet (no AK/SK). |
 | `logout` | Remove the saved login token. |
 | `status` | Show auth source / region / project / token expiry. |
 | `selftest` | Verify AK/SK signing against the official example hash (no credentials needed). |

@@ -12,6 +12,7 @@ import argparse
 import base64
 import hashlib
 import hmac
+import html
 import http.server
 import json
 import os
@@ -555,10 +556,10 @@ def cmd_status(cfg, args):
     if env_tok:
         src = "env HWCLOUD_TOKEN"
     elif data and not _token_expired(data):
-        src = "login token (%s)" % _token_file()
+        src = "saved token (%s)" % _token_file()
     elif data and _token_expired(data):
         exp = datetime.fromtimestamp(data["expires_at"]).strftime("%Y-%m-%d %H:%M:%S") if data.get("expires_at") else "?"
-        src = "login token EXPIRED on %s -> run `login` again" % exp
+        src = "saved token EXPIRED on %s -> run `login` or `capture` again" % exp
     elif cfg.ak and cfg.sk:
         src = "AK/SK (env)"
     else:
@@ -569,6 +570,215 @@ def cmd_status(cfg, args):
     if data and data.get("expires_at"):
         print("Token expiry:", datetime.fromtimestamp(data["expires_at"]).strftime("%Y-%m-%d %H:%M:%S"))
     return 0
+
+
+def _iam_project_check(cfg, token):
+    """Return (ok, body) if `token` authenticates against the IAM projects API."""
+    region = cfg.region or DEFAULT_REGION
+    urls = [
+        "https://iam.%s.myhuaweicloud.com/v3/auth/projects" % region,
+        "https://iam.myhuaweicloud.com/v3/auth/projects",
+    ]
+    tried = set()
+    for url in urls:
+        if url in tried:
+            continue
+        tried.add(url)
+        req = urllib.request.Request(url, headers={"X-Auth-Token": token, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                if resp.status == 200:
+                    return True, resp.read().decode("utf-8", "replace")
+        except Exception:
+            continue
+    return False, ""
+
+
+def _capture_bookmarklet(port):
+    return (
+        "javascript:(async()=>{try{const items=[];const ok=v=>v&&typeof v==='string'"
+        "&&v.length>=20&&v.length<=8192&&!/^[\\[{]/.test(v);"
+        "for(const s of [localStorage,sessionStorage]){for(let i=0;i<s.length;i++){"
+        "const k=s.key(i),v=s.getItem(k);if(ok(v))items.push([k,v]);}}"
+        "for(const part of document.cookie.split(';')){const i=part.indexOf('=');"
+        "if(i>0){const v=decodeURIComponent(part.slice(i+1).trim());if(ok(v))items.push(['cookie',v]);}}"
+        "const r=await fetch('http://127.0.0.1:__PORT__/scan',{method:'POST',"
+        "headers:{'Content-Type':'text/plain'},body:JSON.stringify({items:items})});"
+        "alert(await r.text());}catch(e){alert('Capture failed: '+e);}})()"
+    ).replace("__PORT__", str(port))
+
+
+def _capture_page(port):
+    bm = _capture_bookmarklet(port)
+    bm_html = html.escape(bm)
+    tpl = """<!doctype html>
+<html><head><meta charset="utf-8"><title>MaaS token capture</title>
+<style>body{font-family:Segoe UI,Arial,sans-serif;max-width:760px;margin:40px auto;color:#222;line-height:1.55}
+code,textarea{font-family:Consolas,monospace}textarea{width:100%;height:120px}
+.btn{display:inline-block;padding:8px 14px;background:#c7000b;color:#fff;border-radius:6px;text-decoration:none}
+ol li{margin:6px 0}.muted{color:#666;font-size:13px}</style></head>
+<body>
+<h2>MaaS token capture（无需 AK/SK）</h2>
+<ol>
+<li>先在<strong>同一个浏览器</strong>里登录华为云控制台（任意账号/区域）。</li>
+<li>把下面的按钮拖到书签栏（只装一次）：<br><a class="btn" id="bk" href="#">抓取 MaaS Token</a></li>
+<li>切换到<strong>华为云控制台</strong>页面，点书签栏里的“抓取 MaaS Token”。</li>
+<li>看到 "OK: token captured" 即成功，回到终端执行查询即可。</li>
+</ol>
+<p class="muted">书签失败时，可在控制台按 F12 → Network 任选一个请求，复制 <b>X-Auth-Token</b> 请求头，粘贴到下面手动提交：</p>
+<textarea id="tk" placeholder="粘贴 X-Auth-Token ..."></textarea>
+<p><button class="btn" onclick="manual()">手动提交 Token</button> <span id="msg"></span></p>
+<p class="muted">书签脚本（备用，手动新建书签时粘贴到网址栏）：</p>
+<textarea id="bmsrc" readonly>__BM__</textarea>
+<script>
+document.getElementById('bk').href = document.getElementById('bmsrc').value;
+async function post(items){const r=await fetch('/scan',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({items:items})});document.getElementById('msg').textContent=await r.text();}
+async function manual(){const v=document.getElementById('tk').value.trim();if(!v){return;}await post([['manual',v]]);}
+</script>
+</body></html>"""
+    return tpl.replace("__BM__", bm_html)
+
+
+class _CaptureHandler(http.server.BaseHTTPRequestHandler):
+    server_version = "MaasCapture/1.0"
+
+    def log_message(self, *a):
+        pass
+
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def _send(self, code, text, ctype="text/plain; charset=utf-8"):
+        data = text.encode("utf-8")
+        self.send_response(code)
+        self._cors()
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            self._send(200, self.server.page_html, "text/html; charset=utf-8")
+        else:
+            self._send(404, "not found")
+
+    def do_POST(self):
+        if self.path != "/scan":
+            self._send(404, "not found")
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except Exception:
+            length = 0
+        raw = self.rfile.read(length) if length else b""
+        try:
+            payload = json.loads(raw.decode("utf-8", "replace") or "{}")
+        except Exception:
+            payload = {}
+        items = payload.get("items") or payload.get("candidates") or []
+        if isinstance(items, str):
+            items = [["manual", items]]
+        hint = re.compile(r"token|auth|credential|ticket|session", re.I)
+        tokenish = re.compile(r"^[A-Za-z0-9_\-.~+/=]{20,8192}$")
+        seen = set()
+        cands = []
+        for it in items:
+            if isinstance(it, (list, tuple)) and len(it) == 2:
+                k, v = str(it[0]), it[1]
+            else:
+                k, v = "", it
+            if not isinstance(v, str):
+                continue
+            v = v.strip()
+            if len(v) < 20 or len(v) > 8192:
+                continue
+            if v in seen:
+                continue
+            if v.startswith("{") or v.startswith("["):
+                continue
+            score = 0
+            if hint.search(k):
+                score += 2
+            if tokenish.match(v):
+                score += 1
+            if score == 0:
+                continue
+            seen.add(v)
+            cands.append((score, v))
+        cands.sort(key=lambda x: -x[0])
+        ordered = [v for _, v in cands][:40]
+        good = None
+        for v in ordered:
+            ok, body = _iam_project_check(self.server.cfg, v)
+            if ok:
+                good = v
+                proj = ""
+                try:
+                    for p in (json.loads(body) or {}).get("projects", []) or []:
+                        proj = p.get("id") or proj
+                        break
+                except Exception:
+                    pass
+                data = {"api_token": good, "saved_at": time.time(), "source": "console-capture"}
+                if proj:
+                    data["project_id"] = proj
+                path = _save_token(data)
+                self.server.saved = True
+                self._send(200, "OK: token captured and saved to %s" % path)
+                return
+        self._send(400, "No valid token found among %d candidate(s). Log into the Huawei Cloud "
+                        "console in THIS browser, then click again; or paste X-Auth-Token manually." % len(ordered))
+
+
+def cmd_capture(cfg, args):
+    port = int(getattr(args, "port", None) or 8766)
+    timeout = int(getattr(args, "timeout", None) or 300)
+    page = _capture_page(port)
+    try:
+        httpd = http.server.HTTPServer(("127.0.0.1", port), _CaptureHandler)
+    except OSError as e:
+        raise SystemExit("Cannot listen on 127.0.0.1:%d (%s). Use --port to choose another." % (port, e))
+    httpd.cfg = cfg
+    httpd.saved = False
+    httpd.page_html = page
+    httpd.timeout = 1.0
+    url = "http://127.0.0.1:%d/" % port
+    print("MaaS token capture (no AK/SK needed)")
+    print("  1) Open this page in the SAME browser and log into the Huawei Cloud console:")
+    print("     " + url)
+    print("  2) Drag the 'Capture' bookmarklet to your bookmarks bar (one time).")
+    print("  3) On the Huawei Cloud console tab, click the bookmarklet.")
+    print("  4) Wait for 'OK: token captured'. Press Ctrl+C to cancel.")
+    print("Bookmarklet code:")
+    print("  " + _capture_bookmarklet(port))
+    if not getattr(args, "no_open", False):
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    deadline = time.time() + timeout
+    try:
+        while not httpd.saved and time.time() < deadline:
+            httpd.handle_request()
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+        httpd.server_close()
+        return 130
+    httpd.server_close()
+    if httpd.saved:
+        print("Token captured. You can now run queries (e.g. `services --last 24h`).")
+        return 0
+    print("Timed out with no token captured. Run `capture` again to retry.", file=sys.stderr)
+    return 1
 
 
 class Config:
@@ -1423,6 +1633,13 @@ def build_parser():
     sp_login.add_argument("--timeout", type=int, help="Login wait timeout seconds (default 300)")
     sp_login.set_defaults(func=cmd_login)
 
+    sp_capture = sub.add_parser("capture", parents=[common],
+                                help="Capture a Huawei Cloud console login token (no AK/SK)")
+    sp_capture.add_argument("--port", type=int, help="Local capture port (default 8766)")
+    sp_capture.add_argument("--timeout", type=int, help="Seconds to wait (default 300)")
+    sp_capture.add_argument("--no-open", action="store_true", help="Do not auto-open the browser")
+    sp_capture.set_defaults(func=cmd_capture)
+
     sub.add_parser("logout", help="Remove the saved login token", parents=[common]).set_defaults(func=cmd_logout)
     sub.add_parser("status", help="Show auth source / region / project", parents=[common]).set_defaults(func=cmd_status)
 
@@ -1443,7 +1660,7 @@ def main():
     try:
         cfg = Config(args)
         if not args.dry_run:
-            if args.command not in ("login", "logout", "status"):
+            if args.command not in ("login", "logout", "status", "capture"):
                 cfg.require(need_project=(args.command != "billing"))
         else:
             if not cfg.project_id:
