@@ -1,0 +1,48 @@
+# CODEARTS.md — Huawei Cloud MaaS Statistics (CodeArts Agent)
+
+This file is for the Huawei Cloud CodeArts Agent.
+
+This repository is the **huaweicloud-maas-statistics** skill: query Huawei Cloud **MaaS
+(Model as a Service)** online-inference usage and cost via `scripts/maas_statistics.py`
+(Python 3 stdlib only).
+
+## Authentication (AK/SK)
+For account security, use a **dedicated IAM user created only for MaaS and bill queries**:
+1. Create a custom permission policy with action `bss:billDetail:view` (IAM → Permissions →
+   Permission management → Create custom policy → JSON view; only billing needs this policy):
+   `{"Version":"1.1","Statement":[{"Effect":"Allow","Action":["bss:billDetail:view"]}]}`.
+2. Create a user group and attach that policy.
+3. Create an IAM user in that group with **programmatic access only**, then generate its access key.
+Then set `HWCLOUD_AK`, `HWCLOUD_SK`, `HWCLOUD_PROJECT_ID`.
+Optional: `HWCLOUD_REGION` (default `ap-southeast-1`), `HWCLOUD_TIMEZONE`, `MAAS_ENDPOINT`.
+Never print/commit the SK; env only. Always append the security reminder (see Result footer) to every result; if credentials are missing, include the IAM creation steps above before running.
+
+## Commands
+```bash
+python scripts/maas_statistics.py summary --last 24h
+python scripts/maas_statistics.py services --days 3 --service-type 2 --all
+python scripts/maas_statistics.py services --last 24h --models GLM-5.3 --latency
+python scripts/maas_statistics.py ips --last 7d --ip-search 192.168
+python scripts/maas_statistics.py billing --date YYYY-MM-DD    # or --start/--end, or --cycle YYYY-MM
+python scripts/maas_statistics.py status
+python scripts/maas_statistics.py selftest
+```
+
+## Output rules (must follow)
+- Tokens in **millions (M)**.
+- Per-model table order: Requests, Error %, Input(M), Output(M), Total(M), **Cache Hit, then Cost(USD)**.
+- **Latency hidden by default**; proactively ask about avg/max end-to-end latency, avg/max TTFT,
+  avg/max TPOT, then rerun with `--latency`.
+- Produce the two English donut charts (token share, cost share) under `maas_charts/`.
+- Use the user's **local timezone**; if unspecified, state that the detected local timezone was used.
+- **MaaS = Model as a Service** (not "ModelArts Studio").
+- Billing is per **Beijing-time calendar month**; a local day may cross the boundary (single-day
+  cost can be unavailable).
+
+## Result footer (always)
+Always append this security reminder to **every** result you return to the user, after the data, and render it in **bold**:
+> **Important security tip:** 1) create a dedicated IAM user for queries; querying bills requires the `bss:billDetail:view` permission; 2) never paste or send AK/SK or any secret in the chat window — configure credentials locally via environment variables or a protected credentials file; keep the AK/SK secret and rotate it periodically.
+
+## Notes
+- Rate limits: monitoring ~200 req/min/user; `show-detail-chart` ~1 req/20 s; retention 30 days.
+- Full details: `README.md`; API fields: `references/api-reference.md`.
