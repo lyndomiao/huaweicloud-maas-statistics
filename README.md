@@ -17,7 +17,7 @@ A command-line skill that reports **Huawei Cloud MaaS (Model as a Service)** onl
 ## Requirements
 
 - Python 3.9+ (standard library only).
-- A Huawei Cloud account with MaaS enabled and the project ID. Authentication uses an **AK/SK** pair from a **dedicated IAM user created only for MaaS and bill queries** (see [Authentication](#authentication-aks--create-a-dedicated-iam-user-for-maas--billing-only)).
+- A Huawei Cloud account with MaaS enabled and the project ID. Authentication uses an **AK/SK** pair from a **dedicated IAM user created only for MaaS and bill queries** (see [Authentication](#authentication)).
 - Network access to `modelarts.{region}.myhuaweicloud.com` and (for billing) `bss-intl.myhuaweicloud.com`.
 
 ## Installation
@@ -41,9 +41,9 @@ Credentials and defaults are read from environment variables (or flags):
 | `HWCLOUD_TIMEZONE` | no | User timezone, default = detected local timezone |
 | `MAAS_ENDPOINT` | no | Override the MaaS endpoint host |
 
-### Authentication (AK/SK) — create a dedicated IAM user for MaaS & billing only
+### Authentication
 
-For account security, do **not** use your primary account keys. Create a **dedicated IAM user used only for MaaS and bill queries**:
+Uses an **AK/SK** pair from a dedicated IAM user. For account security, do **not** use your primary account keys. Create a **dedicated IAM user used only for MaaS and bill queries**:
 
 1. **Create a custom permission policy.** In the console go to **IAM → Permissions → Permission management → Create custom policy**, choose the **JSON view**, paste the following, then create. (Only the billing subcommand requires the policy below.)
 

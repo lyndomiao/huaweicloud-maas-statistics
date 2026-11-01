@@ -29,7 +29,7 @@ Keep the SK in env or a local secret manager — never commit it or paste it int
 Optional: `HWCLOUD_REGION` (default `ap-southeast-1`), `HWCLOUD_TIMEZONE` (default = detected user timezone), `MAAS_ENDPOINT`.
 
 ## First run / security notice
-On the **first use after install — even if credentials are already configured — show the user a one-time security notice** about using a **dedicated least-privilege READ-ONLY IAM user** for MaaS and bill queries. If credentials are missing, include the full creation steps below and do not just error out:
+On the **first use after install**, and on **every result** (see Result footer), remind the user to configure credentials **locally** (environment variables or a protected credentials file) and **never** to paste AK/SK in the chat, and recommend a **dedicated least-privilege IAM user** for MaaS and bill queries. If credentials are missing, include the full creation steps below and do not just error out:
 1. IAM → Permissions → Permission management → Create custom policy → JSON view (only billing needs this):
    `{"Version":"1.1","Statement":[{"Effect":"Allow","Action":["bss:billDetail:view"]}]}`
 2. IAM → User groups → Create user group; attach the policy.
